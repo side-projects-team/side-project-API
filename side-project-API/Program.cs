@@ -50,7 +50,7 @@ builder.Services.AddAuthentication(opt =>
         ValidIssuer = jwtSettings["validIssuer"],
         ValidAudience = jwtSettings["validAudience"],
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8
-            .GetBytes(jwtSettings.GetSection("securityKey").Value))
+            .GetBytes(jwtSettings.GetSection("securityKey").Value!))
     };
 });
 
@@ -58,7 +58,7 @@ builder.Services.AddScoped<JwtHandler>();
 
 var emailConfig = builder.Configuration.GetSection("EmailConfiguration").Get<EmailConfiguration>();
 builder.Services.AddSingleton(emailConfig);
-builder.Services.AddScoped<IEmailSender, EmailSender>();
+builder.Services.AddScoped<IEmailSenderStrategy, SmtpEmailSender>();
 
 builder.Services.Configure<FormOptions>(o =>
 {
@@ -85,7 +85,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseCors("CorsPolicy");
+app.UseCors(opt => opt.WithOrigins("*").AllowAnyMethod().AllowAnyHeader());
 
 app.UseAuthorization();
 

@@ -99,3 +99,9 @@ C:\Users\enes1\source\repos\side-project-API\side-project-API\obj\Debug\net6.0\r
 C:\Users\enes1\source\repos\side-project-API\side-project-API\obj\Debug\net6.0\side-project-API.pdb
 C:\Users\enes1\source\repos\side-project-API\side-project-API\obj\Debug\net6.0\side-project-API.genruntimeconfig.cache
 C:\Users\enes1\source\repos\side-project-API\side-project-API\obj\Debug\net6.0\ref\side-project-API.dll
+C:\Users\enes1\source\repos\side-project-API\side-project-API\bin\Debug\net6.0\Google.Apis.dll
+C:\Users\enes1\source\repos\side-project-API\side-project-API\bin\Debug\net6.0\Google.Apis.Auth.PlatformServices.dll
+C:\Users\enes1\source\repos\side-project-API\side-project-API\bin\Debug\net6.0\Google.Apis.Auth.dll
+C:\Users\enes1\source\repos\side-project-API\side-project-API\bin\Debug\net6.0\Google.Apis.Core.dll
+C:\Users\enes1\source\repos\side-project-API\side-project-API\bin\Debug\net6.0\Newtonsoft.Json.dll
+C:\Users\enes1\source\repos\side-project-API\side-project-API\bin\Debug\net6.0\RestSharp.dll

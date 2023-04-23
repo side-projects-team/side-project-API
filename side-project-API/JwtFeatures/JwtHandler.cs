@@ -1,5 +1,7 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using Google.Apis.Auth;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
+using side_project_API.Entities.DataTransferObjects;
 using side_project_API.Entities.Models;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -11,12 +13,14 @@ namespace side_project_API.JwtFeatures
     {
         private readonly IConfiguration _configuration;
         private readonly IConfigurationSection _jwtSettings;
+        private readonly IConfigurationSection _goolgeSettings;
         private readonly UserManager<User> _userManager;
 
         public JwtHandler(IConfiguration configuration, UserManager<User> userManager)
         {
             _configuration = configuration;
             _jwtSettings = _configuration.GetSection("JwtSettings");
+            _goolgeSettings = _configuration.GetSection("GoogleAuthSettings");
             _userManager = userManager;
         }
 
@@ -30,7 +34,7 @@ namespace side_project_API.JwtFeatures
             return token;
         }
 
-        private SigningCredentials GetSigningCredentials()
+        public SigningCredentials GetSigningCredentials()
         {
             var key = Encoding.UTF8.GetBytes(_jwtSettings.GetSection("securityKey").Value!);
             var secret = new SymmetricSecurityKey(key);
@@ -38,7 +42,7 @@ namespace side_project_API.JwtFeatures
             return new SigningCredentials(secret, SecurityAlgorithms.HmacSha256);
         }
 
-        private async Task<List<Claim>> GetClaims(User user)
+        public async Task<List<Claim>> GetClaims(User user)
         {
             var claims = new List<Claim>
             {
@@ -54,7 +58,7 @@ namespace side_project_API.JwtFeatures
             return claims;
         }
 
-        private JwtSecurityToken GenerateTokenOptions(SigningCredentials signingCredentials, List<Claim> claims)
+        public JwtSecurityToken GenerateTokenOptions(SigningCredentials signingCredentials, List<Claim> claims)
         {
             var tokenOptions = new JwtSecurityToken(
                 issuer: _jwtSettings["validIssuer"],
@@ -64,6 +68,24 @@ namespace side_project_API.JwtFeatures
                 signingCredentials: signingCredentials);
 
             return tokenOptions;
+        }
+
+        public async Task<GoogleJsonWebSignature.Payload> VerifyGoogleToken(ExternalAuthDto externalAuth)
+        {
+            try
+            {
+                var settings = new GoogleJsonWebSignature.ValidationSettings()
+                {
+                    Audience = new List<string>() { _goolgeSettings.GetSection("clientId").Value! }
+                };
+                var payload = await GoogleJsonWebSignature.ValidateAsync(externalAuth.IdToken, settings);
+                return payload;
+            }
+            catch (Exception ex)
+            {
+                //log an exception
+                return null;
+            }
         }
     }
 }

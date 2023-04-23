@@ -1,5 +1,6 @@
 ﻿using AutoMapper;
 using EmailService;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
@@ -16,9 +17,9 @@ namespace side_project_API.Controllers
         private readonly UserManager<User> _userManager;
         private readonly IMapper _mapper;
         private readonly JwtHandler _jwtHandler;
-        private readonly IEmailSender _emailSender;
+        private readonly IEmailSenderStrategy _emailSender;
 
-        public AuthenticationController(UserManager<User> userManager, IMapper mapper, JwtHandler jwtHandler, IEmailSender emailSender)
+        public AuthenticationController(UserManager<User> userManager, IMapper mapper, JwtHandler jwtHandler, IEmailSenderStrategy emailSender)
         {
             _userManager = userManager;
             _mapper = mapper;
@@ -33,6 +34,9 @@ namespace side_project_API.Controllers
                 return BadRequest();
 
             var user = _mapper.Map<User>(userForRegistration);
+
+            user.TwoFactorEnabled = true;
+
             var result = await _userManager.CreateAsync(user, userForRegistration.Password);
             if (!result.Succeeded)
             {
@@ -51,7 +55,7 @@ namespace side_project_API.Controllers
             var callback = QueryHelpers.AddQueryString(userForRegistration.ClientURI, param);
 
             var message = new Message(new string[] { user.Email }, "Email Confirmation token", callback, null);
-            await _emailSender.SendEmailAsync(message);
+            _emailSender.SendEmailAsync(message);
 
             await _userManager.AddToRoleAsync(user, "Viewer");
 
@@ -62,6 +66,7 @@ namespace side_project_API.Controllers
         public async Task<IActionResult> Login([FromBody] UserForAuthenticationDto userForAuthentication)
         {
             var user = await _userManager.FindByNameAsync(userForAuthentication.Email);
+            
             if (user == null)
                 return BadRequest("Invalid Request");
 
@@ -75,10 +80,10 @@ namespace side_project_API.Controllers
                 if (await _userManager.IsLockedOutAsync(user))
                 {
                     var content = $@"Your account is locked out. To reset the password click this link: {userForAuthentication.ClientURI}";
-                    var message = new Message(new string[] { userForAuthentication.Email },
+                    var message = new Message(new string[] { userForAuthentication.Email! },
                         "Locked out account information", content, null);
 
-                    await _emailSender.SendEmailAsync(message);
+                    _emailSender.SendEmailAsync(message);
 
                     return Unauthorized(new AuthResponseDto { ErrorMessage = "The account is locked out" });
                 }
@@ -107,12 +112,12 @@ namespace side_project_API.Controllers
             var token = await _userManager.GenerateTwoFactorTokenAsync(user, "Email");
             var message = new Message(new string[] { user.Email }, "Authentication token", token, null);
 
-            await _emailSender.SendEmailAsync(message);
+            _emailSender.SendEmailAsync(message);
 
             return Ok(new AuthResponseDto { Is2StepVerificationRequired = true, Provider = "Email" });
         }
 
-        [HttpPost("ForgotPassword")]
+        [HttpPost("forgotPassword")]
         public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto forgotPasswordDto)
         {
             if (!ModelState.IsValid)
@@ -129,25 +134,27 @@ namespace side_project_API.Controllers
                 {"email", forgotPasswordDto.Email }
             };
 
-            var callback = QueryHelpers.AddQueryString(forgotPasswordDto.ClientURI, param);
+            var callback = QueryHelpers.AddQueryString(forgotPasswordDto.ClientURI ?? "/", param);
             var message = new Message(new string[] { user.Email }, "Reset password token", callback, null);
 
-            await _emailSender.SendEmailAsync(message);
+            _emailSender.SendEmailAsync(message);
 
             return Ok();
         }
 
-        [HttpPost("ResetPassword")]
+        [HttpPost("resetPassword")]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto resetPasswordDto)
         {
             if (!ModelState.IsValid)
                 return BadRequest();
 
             var user = await _userManager.FindByEmailAsync(resetPasswordDto.Email);
+
             if (user == null)
                 return BadRequest("Invalid Request");
 
             var resetPassResult = await _userManager.ResetPasswordAsync(user, resetPasswordDto.Token, resetPasswordDto.Password);
+
             if (!resetPassResult.Succeeded)
             {
                 var errors = resetPassResult.Errors.Select(e => e.Description);
@@ -160,7 +167,7 @@ namespace side_project_API.Controllers
             return Ok();
         }
 
-        [HttpGet("EmailConfirmation")]
+        [HttpGet("emailConfirmation")]
         public async Task<IActionResult> EmailConfirmation([FromQuery] string email, [FromQuery] string token)
         {
             var user = await _userManager.FindByEmailAsync(email);
@@ -174,23 +181,65 @@ namespace side_project_API.Controllers
             return Ok();
         }
 
-        [HttpPost("TwoStepVerification")]
+        [HttpPost("twoStepVerification")]
         public async Task<IActionResult> TwoStepVerification([FromBody] TwoFactorDto twoFactorDto)
         {
             if (!ModelState.IsValid)
                 return BadRequest();
 
             var user = await _userManager.FindByEmailAsync(twoFactorDto.Email);
+
             if (user is null)
                 return BadRequest("Invalid Request");
 
             var validVerification = await _userManager.VerifyTwoFactorTokenAsync(user, twoFactorDto.Provider, twoFactorDto.Token);
+
             if (!validVerification)
                 return BadRequest("Invalid Token Verification");
 
             var token = await _jwtHandler.GenerateToken(user);
 
             return Ok(new AuthResponseDto { IsAuthSuccessful = true, Token = token });
+        }
+
+        [HttpPost("externalLogin")]
+        public async Task<IActionResult> ExternalLogin([FromBody] ExternalAuthDto externalAuth)
+        {
+            var payload = await _jwtHandler.VerifyGoogleToken(externalAuth);
+            if (payload == null)
+                return BadRequest("Invalid External Authentication.");
+            var info = new UserLoginInfo(externalAuth.Provider, payload.Subject, externalAuth.Provider);
+            var user = await _userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
+            if (user == null)
+            {
+                user = await _userManager.FindByEmailAsync(payload.Email);
+                if (user == null)
+                {
+                    user = new User { Email = payload.Email, UserName = payload.Email };
+                    await _userManager.CreateAsync(user);
+                    //prepare and send an email for the email confirmation
+                    await _userManager.AddToRoleAsync(user, "Viewer");
+                    await _userManager.AddLoginAsync(user, info);
+                }
+                else
+                {
+                    await _userManager.AddLoginAsync(user, info);
+                }
+            }
+            if (user == null)
+                return BadRequest("Invalid External Authentication.");
+            //check for the Locked out account
+            var token = await _jwtHandler.GenerateToken(user);
+            return Ok(new AuthResponseDto { Token = token, IsAuthSuccessful = true });
+        }
+
+        [HttpGet("privacy")]
+        [Authorize]
+        public IActionResult Privacy()
+        {
+            var claims = User.Claims.Select(c => new { c.Type, c.Value }).ToList();
+
+            return Ok(claims);
         }
     }
 }
